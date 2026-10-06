@@ -1,0 +1,8 @@
+{"question": "How do I reset my password?", "expect_route": "vectorstore", "must_include_any": ["password", "reset", "login"]}
+{"question": "What happens if my payment fails?", "expect_route": "vectorstore", "must_include_any": ["payment", "billing", "retry", "retries"]}
+{"question": "What's the API rate limit on the free plan?", "expect_route": "vectorstore", "must_include_any": ["rate", "limit", "api", "requests"]}
+{"question": "How long do I have to download my data export?", "expect_route": "vectorstore", "must_include_any": ["export", "data", "download"]}
+{"question": "Can I get a refund after canceling my subscription?", "expect_route": "vectorstore", "must_include_any": ["refund", "billing", "cancel"]}
+{"question": "hello", "expect_route": "direct_answer", "must_include_any": []}
+{"question": "I want to speak to a human agent immediately", "expect_route": "escalate", "must_include_any": ["human", "agent"]}
+{"question": "What's the airspeed velocity of an unladen swallow?", "expect_route": "vectorstore", "must_include_any": [], "allow_escalation": true}
