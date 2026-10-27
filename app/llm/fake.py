@@ -12,24 +12,13 @@ from typing import Type, TypeVar
 from pydantic import BaseModel
 
 from app.schemas import Critique, DocumentGrade, RouteDecision
+from app.text_utils import keywords as _keywords
+from app.text_utils import words as _words
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 _ESCALATION_TERMS = {"human", "agent", "manager", "representative", "lawsuit", "fraud"}
 _GREETING_TERMS = {"hi", "hello", "hey", "thanks"}
-_STOPWORDS = {
-    "a", "an", "the", "is", "it", "i", "my", "me", "do", "does", "to", "of", "on", "in",
-    "for", "and", "or", "how", "what", "when", "can", "you", "your", "with", "this",
-    "that", "are", "be", "if", "so", "will", "not",
-}
-
-
-def _words(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", text.lower()))
-
-
-def _keywords(text: str) -> set[str]:
-    return _words(text) - _STOPWORDS
 
 
 def _overlap_score(a: str, b: str) -> float:
@@ -88,7 +77,12 @@ class FakeLLMClient:
     def _critique(self, user: str) -> Critique:
         question, context, answer = self._split_critique_payload(user)
         grounded_score = _overlap_score(answer, context)
-        relevance_score = _overlap_score(answer, question)
+        # Coverage of the QUESTION's keywords found in the answer, not the
+        # reverse: a long answer will rarely contain most of its own keywords
+        # inside a short question, so _overlap_score(answer, question) is
+        # backwards and was near-impossible to satisfy once answers got longer
+        # than a one-line echo.
+        relevance_score = _overlap_score(question, answer)
         grounded = grounded_score >= 0.15 or not context.strip()
         addresses_question = relevance_score >= 0.15
         confidence = round(min(1.0, (grounded_score + relevance_score) / 2 + 0.2), 3)
@@ -123,7 +117,10 @@ class FakeLLMClient:
                 "I'd recommend escalating this to a human agent."
             )
 
-        snippet = context.split("\n")[0][:280]
+        # Collapse whitespace/newlines so the snippet carries real body text
+        # (facts, numbers) rather than stopping at the first line, which for
+        # markdown-chunked context is often just a "# Heading".
+        snippet = " ".join(context.split())[:400]
         return f"Based on our documentation: {snippet} (This addresses: {question})"
 
     # -- parsing helpers --------------------------------------------------------
