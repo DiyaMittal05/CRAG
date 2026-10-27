@@ -1,92 +1,59 @@
-"""Automated eval-set runner, wired into CI on every push.
+"""CI gate: runs the full eval set against the CRAG graph (mock backend, no
+API key needed) and fails the build if route accuracy or refusal accuracy on
+unanswerable questions drops below a regression threshold.
 
-Runs the full CRAG graph (with deterministic fake LLM/embedding backends, so
-no API key is required) against a fixed set of support questions and checks
-routing + grounding expectations. Exits non-zero if the pass rate drops below
-`PASS_THRESHOLD`, which fails the GitHub Actions job.
+Thresholds are set from a real measured baseline run plus a small margin
+(see results/RESULTS.md for the run they came from) - not guessed.
 """
 from __future__ import annotations
 
-import json
 import sys
 import tempfile
-from pathlib import Path
 
-from app.config import Settings
-from app.graph.build import build_graph
-from app.llm.fake import FakeLLMClient
-from app.vectorstore.chroma_store import build_vectorstore
-from app.vectorstore.ingest import load_documents
+from eval.metrics import load_eval_cases, run_eval, summarize
 
-EVAL_SET_PATH = Path(__file__).parent / "eval_set.jsonl"
-PASS_THRESHOLD = 0.75
-
-
-def load_eval_cases() -> list[dict]:
-    cases = []
-    with EVAL_SET_PATH.open() as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                cases.append(json.loads(line))
-    return cases
-
-
-def build_eval_graph(chroma_dir: str):
-    settings = Settings(
-        use_fake_backends=True,
-        chroma_persist_dir=chroma_dir,
-        relevance_threshold=0.2,
-        max_retries=2,
-        retriever_k=4,
-    )
-    documents = load_documents(settings.docs_dir)
-    vectorstore = build_vectorstore(settings, collection_name="eval_support_docs")
-    vectorstore.add_documents(documents)
-    llm_client = FakeLLMClient()
-    return build_graph(llm_client, vectorstore, settings, mode="crag")
-
-
-def check_case(case: dict, result: dict) -> tuple[bool, str]:
-    expected_route = case.get("expect_route")
-    if expected_route and result.get("route") != expected_route:
-        return False, f"expected route={expected_route!r}, got {result.get('route')!r}"
-
-    must_include_any = case.get("must_include_any") or []
-    if must_include_any:
-        answer = (result.get("answer") or "").lower()
-        if not any(term.lower() in answer for term in must_include_any):
-            return False, f"answer did not contain any of {must_include_any}: {answer!r}"
-
-    if not case.get("allow_escalation") and expected_route == "vectorstore":
-        if result.get("escalated") and case.get("expect_route") != "escalate":
-            return False, "unexpectedly escalated a question that should have been answered"
-
-    return True, "ok"
+# Set from the measured run in results/RESULTS.md (route_accuracy=100%,
+# refusal_accuracy=60%), each with a margin below that - not guessed. The
+# mock backend is deterministic, so these exist to catch a regression from a
+# future code/eval_set change, not run-to-run noise.
+ROUTE_ACCURACY_THRESHOLD = 0.95
+REFUSAL_ACCURACY_THRESHOLD = 0.50
 
 
 def main() -> int:
     cases = load_eval_cases()
     with tempfile.TemporaryDirectory() as chroma_dir:
-        graph = build_eval_graph(chroma_dir)
+        rows = run_eval("crag", chroma_dir)
 
-        passed = 0
-        for case in cases:
-            result = graph.invoke({"question": case["question"]})
-            ok, detail = check_case(case, result)
-            status = "PASS" if ok else "FAIL"
-            print(f"[{status}] {case['question']!r} -> {detail}")
-            if ok:
-                passed += 1
+    for row in rows:
+        route_mark = "." if row["route_correct"] in (True, None) else "X"
+        print(f"[{route_mark}] {row['id']:<16} route={row['route']!r} retries={row['retries']}")
 
-    pass_rate = passed / len(cases) if cases else 0.0
-    print(f"\nPass rate: {passed}/{len(cases)} ({pass_rate:.0%})")
+    summary = summarize(rows)
+    print(f"\nn={summary['n']} cases")
+    print(f"route_accuracy={summary['route_accuracy']}")
+    print(f"refusal_accuracy={summary['refusal_accuracy']} (n={summary['refusal_accuracy_n']})")
+    print(f"groundedness={summary['groundedness']}")
+    print(f"correctness={summary['correctness']} (scored on {summary['correctness_n_scored']}/{summary['n']})")
+    print(f"re_retrieval_rate={summary['re_retrieval_rate']}")
+    print(f"weak_context_escalation_rate={summary['weak_context_escalation_rate']}")
+    print(f"avg_llm_calls={summary['avg_llm_calls']}")
+    print(f"latency_p50_ms={summary['latency_p50_ms']:.2f} latency_p95_ms={summary['latency_p95_ms']:.2f}")
 
-    if pass_rate < PASS_THRESHOLD:
-        print(f"FAILED: pass rate below threshold ({PASS_THRESHOLD:.0%})")
+    failed = False
+    if summary["route_accuracy"] is not None and summary["route_accuracy"] < ROUTE_ACCURACY_THRESHOLD:
+        print(f"\nFAILED: route_accuracy {summary['route_accuracy']:.0%} < {ROUTE_ACCURACY_THRESHOLD:.0%}")
+        failed = True
+    if summary["refusal_accuracy"] is not None and summary["refusal_accuracy"] < REFUSAL_ACCURACY_THRESHOLD:
+        print(
+            f"\nFAILED: refusal_accuracy {summary['refusal_accuracy']:.0%} < {REFUSAL_ACCURACY_THRESHOLD:.0%}"
+        )
+        failed = True
+
+    if failed:
         return 1
 
-    print("Eval suite passed.")
+    print("\nEval suite passed.")
     return 0
 
 

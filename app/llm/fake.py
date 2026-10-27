@@ -17,8 +17,9 @@ from app.text_utils import words as _words
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
-_ESCALATION_TERMS = {"human", "agent", "manager", "representative", "lawsuit", "fraud"}
+_ESCALATION_TERMS = {"human", "agent", "manager", "representative", "lawsuit", "fraud", "legal"}
 _GREETING_TERMS = {"hi", "hello", "hey", "thanks"}
+_GREETING_MAX_WORDS = 4
 
 
 def _overlap_score(a: str, b: str) -> float:
@@ -57,10 +58,18 @@ class FakeLLMClient:
     # -- structured handlers -------------------------------------------------
 
     def _route(self, user: str) -> RouteDecision:
-        question = _words(user)
+        # user is "Question: {text}" (see RouterAgent.route); tokenizing the
+        # raw string adds a spurious "question" token that inflated every
+        # word count by one and silently broke the length-based greeting check.
+        match = re.search(r"Question:\s*(.+)", user, re.IGNORECASE | re.DOTALL)
+        question_text = match.group(1).strip() if match else user.strip()
+        question = _words(question_text)
         if question & _ESCALATION_TERMS:
             return RouteDecision(route="escalate", reasoning="Question mentions an escalation trigger term.")
-        if question <= _GREETING_TERMS or len(question) <= 2:
+        # Contains a greeting/courtesy term (not "is only made of" one) and is
+        # short - "thanks for your help" and "hey there" are still greetings;
+        # requiring every word be a greeting term missed both.
+        if (question & _GREETING_TERMS and len(question) <= _GREETING_MAX_WORDS) or len(question) <= 2:
             return RouteDecision(route="direct_answer", reasoning="Question is a short greeting/courtesy message.")
         return RouteDecision(route="vectorstore", reasoning="Question needs grounded knowledge lookup.")
 

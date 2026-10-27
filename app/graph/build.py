@@ -172,6 +172,14 @@ def build_graph(llm_client: LLMClient, vectorstore, settings: Settings, mode: Mo
             return "escalate_weak_context"
         return "transform_query"
 
+    def decide_after_generate(state: GraphState) -> str:
+        # Critique checks a drafted answer against retrieved context; the
+        # direct_answer route never retrieves anything, so there is nothing
+        # to critique - without this, "generate" fed critique_answer
+        # unconditionally, and a canned no-context answer never "addressed"
+        # a greeting, spuriously driving even "hi" into the retry loop.
+        return "critique" if state.get("route") == "vectorstore" else "finalize"
+
     def decide_after_critique(state: GraphState) -> str:
         result = state.get("critique")
         if result and result.grounded and result.addresses_question:
@@ -217,7 +225,11 @@ def build_graph(llm_client: LLMClient, vectorstore, settings: Settings, mode: Mo
             },
         )
         graph.add_edge("transform_query", "retrieve")
-        graph.add_edge("generate", "critique_answer")
+        graph.add_conditional_edges(
+            "generate",
+            decide_after_generate,
+            {"critique": "critique_answer", "finalize": "finalize"},
+        )
         graph.add_conditional_edges(
             "critique_answer",
             decide_after_critique,
