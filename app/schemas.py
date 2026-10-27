@@ -35,6 +35,9 @@ class Critique(BaseModel):
 class SupportQuery(BaseModel):
     question: str = Field(min_length=1)
     session_id: str | None = None
+    mode: Literal["baseline", "crag"] = Field(
+        default="crag", description="'crag' runs the full self-correcting pipeline; 'baseline' is a single retrieve-then-answer pass with no grading, rewriting, or critique."
+    )
 
 
 class Source(BaseModel):
@@ -51,3 +54,20 @@ class SupportResponse(BaseModel):
     escalated: bool
     retries: int
     trace_id: str
+    mode: str
+    llm_calls: int = Field(description="Number of LLM calls made while answering this query.")
+
+
+class EscalationResponse(BaseModel):
+    """Returned instead of SupportResponse when the grader still rejects the
+    retrieved context after the configured retry budget is exhausted — the
+    agent declines to answer from context it has already judged too weak."""
+
+    status: Literal["escalated"] = "escalated"
+    reason: str
+    queries_tried: list[str]
+    top_sources: list[Source]
+    trace_id: str
+    mode: str
+    retries: int
+    llm_calls: int

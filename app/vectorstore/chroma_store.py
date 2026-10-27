@@ -13,7 +13,3 @@ def build_vectorstore(settings: Settings, *, collection_name: str = "support_doc
         embedding_function=embeddings,
         persist_directory=settings.chroma_persist_dir,
     )
-
-
-def get_retriever(vectorstore: Chroma, k: int):
-    return vectorstore.as_retriever(search_kwargs={"k": k})

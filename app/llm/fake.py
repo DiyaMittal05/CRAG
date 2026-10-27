@@ -46,7 +46,11 @@ def _overlap_score(a: str, b: str) -> float:
 
 
 class FakeLLMClient:
+    def __init__(self) -> None:
+        self.call_count = 0
+
     def structured(self, system: str, user: str, schema: Type[SchemaT]) -> SchemaT:
+        self.call_count += 1
         if schema is RouteDecision:
             return self._route(user)  # type: ignore[return-value]
         if schema is DocumentGrade:
@@ -56,6 +60,7 @@ class FakeLLMClient:
         raise NotImplementedError(f"FakeLLMClient has no handler for {schema!r}")
 
     def complete(self, system: str, user: str) -> str:
+        self.call_count += 1
         if "rewrite" in system.lower():
             return self._rewrite_query(user)
         return self._generate_answer(user)

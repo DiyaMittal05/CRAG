@@ -6,8 +6,7 @@ from langchain_core.documents import Document
 from app.config import Settings
 from app.graph.build import build_graph
 from app.llm.fake import FakeLLMClient
-from app.observability.tracer import Tracer
-from app.vectorstore.chroma_store import build_vectorstore, get_retriever
+from app.vectorstore.chroma_store import build_vectorstore
 
 FIXTURE_DOCS = [
     Document(
@@ -40,14 +39,22 @@ def test_settings(tmp_path):
 
 
 @pytest.fixture
-def retriever(test_settings):
-    vectorstore = build_vectorstore(test_settings, collection_name="test_support_docs")
-    vectorstore.add_documents(FIXTURE_DOCS)
-    return get_retriever(vectorstore, k=test_settings.retriever_k)
+def vectorstore(test_settings):
+    vs = build_vectorstore(test_settings, collection_name="test_support_docs")
+    vs.add_documents(FIXTURE_DOCS)
+    return vs
 
 
 @pytest.fixture
-def graph(test_settings, retriever):
-    llm_client = FakeLLMClient()
-    tracer = Tracer()
-    return build_graph(llm_client, retriever, test_settings, tracer)
+def llm_client():
+    return FakeLLMClient()
+
+
+@pytest.fixture
+def graph(llm_client, vectorstore, test_settings):
+    return build_graph(llm_client, vectorstore, test_settings, mode="crag")
+
+
+@pytest.fixture
+def baseline_graph(llm_client, vectorstore, test_settings):
+    return build_graph(llm_client, vectorstore, test_settings, mode="baseline")

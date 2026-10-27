@@ -15,8 +15,7 @@ from pathlib import Path
 from app.config import Settings
 from app.graph.build import build_graph
 from app.llm.fake import FakeLLMClient
-from app.observability.tracer import Tracer
-from app.vectorstore.chroma_store import build_vectorstore, get_retriever
+from app.vectorstore.chroma_store import build_vectorstore
 from app.vectorstore.ingest import load_documents
 
 EVAL_SET_PATH = Path(__file__).parent / "eval_set.jsonl"
@@ -44,10 +43,8 @@ def build_eval_graph(chroma_dir: str):
     documents = load_documents(settings.docs_dir)
     vectorstore = build_vectorstore(settings, collection_name="eval_support_docs")
     vectorstore.add_documents(documents)
-    retriever = get_retriever(vectorstore, k=settings.retriever_k)
     llm_client = FakeLLMClient()
-    tracer = Tracer()
-    return build_graph(llm_client, retriever, settings, tracer)
+    return build_graph(llm_client, vectorstore, settings, mode="crag")
 
 
 def check_case(case: dict, result: dict) -> tuple[bool, str]:

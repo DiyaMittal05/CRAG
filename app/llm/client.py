@@ -28,8 +28,10 @@ class OpenAIChatClient:
         from langchain_openai import ChatOpenAI
 
         self._chat = ChatOpenAI(model=model, api_key=api_key, temperature=temperature)
+        self.call_count = 0
 
     def structured(self, system: str, user: str, schema: Type[SchemaT]) -> SchemaT:
+        self.call_count += 1
         structured_llm = self._chat.with_structured_output(schema)
         return structured_llm.invoke(
             [
@@ -39,6 +41,7 @@ class OpenAIChatClient:
         )
 
     def complete(self, system: str, user: str) -> str:
+        self.call_count += 1
         response = self._chat.invoke(
             [
                 {"role": "system", "content": system},
